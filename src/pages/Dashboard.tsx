@@ -1,12 +1,13 @@
 import { Flame, Play, Sparkles, ClipboardCheck, Signpost, ChevronRight, CheckCircle2, RotateCcw } from 'lucide-react';
-import { BANK, CATEGORIES } from '../data/bank';
+import { BANK, CATEGORIES, SETS, type PracticeSet } from '../data/bank';
 import { SignSvg } from '../data/signs';
 import type { CategoryId } from '../data/types';
 import { dayKey, levelFor, levelName, liveStreak, useProgress } from '../store';
 import { Bar, Button, Card, Icon, Ring, SectionTitle, pct } from '../components/ui';
 import { catAccuracy } from './Practice';
 
-export default function Dashboard({ go, startCategory, startDaily, startReview }: {
+export default function Dashboard({ go, startCategory, startDaily, startReview, startSet }: {
+  startSet: (s: PracticeSet) => void;
   go: (r: string) => void;
   startCategory: (c: CategoryId) => void;
   startDaily: () => void;
@@ -84,6 +85,25 @@ export default function Dashboard({ go, startCategory, startDaily, startReview }
           </div>
           <Button variant="navy" onClick={startReview} disabled={!p.missed.length}>Review</Button>
         </Card>
+      </div>
+
+      <SectionTitle action={<button className="text-sm font-bold text-info" onClick={() => go('practice')}>Open Practice</button>}>Practice sets</SectionTitle>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {SETS.map((s) => {
+          const r = p.resume[s.id];
+          const done = p.sets[s.id];
+          const tone = s.level === 1 ? 'bg-good' : s.level === 2 ? 'bg-yellow' : 'bg-bad';
+          return (
+            <button key={s.id} onClick={() => startSet(s)} className="group text-left" aria-label={`${s.label}, 100 questions${r ? ', in progress' : done ? `, best ${done.best}%` : ''}`}>
+              <Card className="h-full p-4 transition group-hover:-translate-y-0.5 group-hover:border-info group-hover:shadow-md">
+                <span className={`block h-1.5 w-8 rounded-full ${tone}`} />
+                <span className="mt-2 block text-lg font-extrabold">{s.label}</span>
+                <span className="block text-xs font-semibold text-muted">{r ? `Continue at ${Math.min(r.i + 1, 100)}/100` : done ? `Best ${done.best}%` : '100 questions'}</span>
+                <Bar value={r ? r.i / 100 : done ? 1 : 0} className="mt-2" color={tone} label={`${s.label} progress`} />
+              </Card>
+            </button>
+          );
+        })}
       </div>
 
       <SectionTitle action={<button className="text-sm font-bold text-info" onClick={() => go('progress')}>See all</button>}>Topics</SectionTitle>

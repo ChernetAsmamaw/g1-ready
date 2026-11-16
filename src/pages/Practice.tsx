@@ -1,13 +1,9 @@
+import { RotateCcw, Timer, Play, CheckCircle2, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
-import { Shuffle, Signpost, RotateCcw, Timer, Play } from 'lucide-react';
-import { BANK, CATEGORIES } from '../data/bank';
+import { BANK, CATEGORIES, LEVEL_LABEL, SETS, topicSet, type PracticeSet } from '../data/bank';
 import type { CategoryId, Difficulty } from '../data/types';
-import { useProgress, update } from '../store';
-import { Button, Card, Icon, pct } from '../components/ui';
-
-export interface PracticeChoice { cats: CategoryId[]; difficulty: Difficulty; count: number; timed: boolean; title: string; review?: boolean }
-
-type Topic = CategoryId | 'mixed' | 'review';
+import { clearResume, useProgress, update } from '../store';
+import { Bar, Button, Card, Icon } from '../components/ui';
 
 export function catAccuracy(qstats: Record<string, { s: number; c: number; last: 0 | 1 }>, cat: CategoryId) {
   let s = 0, c = 0, seen = 0, mastered = 0;
@@ -21,83 +17,81 @@ export function catAccuracy(qstats: Record<string, { s: number; c: number; last:
   return { attempts: s, correct: c, acc: s ? c / s : null, seen, mastered, total: qs.length };
 }
 
-export default function Practice({ onStart, initial }: { onStart: (c: PracticeChoice) => void; initial?: Topic }) {
+const LEVEL_STYLE: Record<Difficulty, { chip: string; bar: string; blurb: string }> = {
+  1: { chip: 'bg-good-soft text-good', bar: 'bg-good', blurb: 'The basics: common signs and everyday rules.' },
+  2: { chip: 'bg-yellow/30 text-ink', bar: 'bg-yellow', blurb: 'Trickier situations and what to do at each sign.' },
+  3: { chip: 'bg-bad-soft text-bad', bar: 'bg-bad', blurb: 'Exact distances, penalties and the fine print.' },
+};
+const LEVELS: Difficulty[] = [1, 2, 3];
+
+export default function Practice({ onStartSet, onReview, openTopics }: { onStartSet: (s: PracticeSet) => void; onReview: () => void; openTopics?: boolean }) {
   const p = useProgress();
-  const [topic, setTopic] = useState<Topic>(initial || 'mixed');
-  const [difficulty, setDifficulty] = useState<Difficulty>(1);
-  const [count, setCount] = useState(10);
+  const [topics, setTopics] = useState(!!openTopics);
   const timed = p.settings.timer;
 
-  const topics: { id: Topic; label: string; sub: string; icon: JSX.Element }[] = [
-    { id: 'mixed', label: 'Mixed practice', sub: 'Questions from every topic', icon: <Shuffle className="h-5 w-5" aria-hidden="true" /> },
-    ...CATEGORIES.map((c) => {
-      const a = catAccuracy(p.qstats, c.id);
-      return {
-        id: c.id as Topic,
-        label: c.id === 'signs' ? 'Road signs only' : c.label,
-        sub: a.acc === null ? `${a.total} questions · not started` : `${a.total} questions · ${pct(a.correct, a.attempts)}% accuracy`,
-        icon: c.id === 'signs' ? <Signpost className="h-5 w-5" aria-hidden="true" /> : <Icon name={c.icon} />,
-      };
-    }),
-    { id: 'review', label: 'Missed questions', sub: p.missed.length ? `${p.missed.length} to review` : 'Nothing to review yet', icon: <RotateCcw className="h-5 w-5" aria-hidden="true" /> },
-  ];
-
-  const start = () => {
-    const cats = topic === 'mixed' || topic === 'review' ? CATEGORIES.map((c) => c.id) : [topic];
-    const t = topics.find((x) => x.id === topic)!;
-    onStart({ cats, difficulty, count, timed, title: t.label, review: topic === 'review' });
-  };
-
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-4xl">
       <h1 className="text-3xl font-extrabold tracking-tight">Practice</h1>
-      <p className="mt-1 text-muted">Pick a topic, a level and how many questions. Every answer comes with an explanation.</p>
+      <p className="mt-1 text-muted">All {BANK.length} questions, sorted into six sets of 100: two easy, two medium and two hard. Every set mixes all topics, and your place is saved if you stop part-way.</p>
 
-      <fieldset className="mt-6">
-        <legend className="mb-3 text-sm font-extrabold uppercase tracking-wider text-muted">1. Topic</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {topics.map((t) => {
-            const disabled = t.id === 'review' && !p.missed.length;
-            const sel = topic === t.id;
-            return (
-              <label key={t.id} className={`flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-4 transition ${sel ? 'border-info bg-info-soft' : 'border-line bg-surface hover:border-info/60'} ${disabled ? 'pointer-events-none opacity-50' : ''}`}>
-                <input type="radio" name="topic" className="sr-only" checked={sel} disabled={disabled} onChange={() => setTopic(t.id)} />
-                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${sel ? 'bg-info text-white' : 'bg-raised'}`}>{t.icon}</span>
-                <span className="min-w-0">
-                  <span className="block font-bold">{t.label}</span>
-                  <span className="block text-sm text-muted">{t.sub}</span>
+      <div className="mt-6 space-y-6">
+        {LEVELS.map((d) => (
+          <section key={d} aria-label={`${LEVEL_LABEL[d]} sets`}>
+            <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
+              <h2 className="text-xl font-extrabold">{LEVEL_LABEL[d]}</h2>
+              <p className="text-sm text-muted">{LEVEL_STYLE[d].blurb}</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {SETS.filter((s) => s.level === d).map((s) => <SetCard key={s.id} set={s} onStart={onStartSet} />)}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <Card className="mt-8 overflow-hidden">
+        <button className="flex w-full items-center justify-between gap-3 p-5 text-left" onClick={() => setTopics((v) => !v)} aria-expanded={topics}>
+          <span>
+            <span className="block text-lg font-extrabold">Practise one topic <span className="ml-1 rounded-full bg-raised px-2 py-0.5 text-xs font-bold text-muted">Optional</span></span>
+            <span className="block text-sm text-muted">Road signs only, rules only and so on. Each button plays every question that topic has at that level.</span>
+          </span>
+          <ChevronDown className={`h-5 w-5 shrink-0 transition ${topics ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </button>
+        {topics && (
+          <div className="divide-y divide-line border-t border-line">
+            {CATEGORIES.map((c) => (
+              <div key={c.id} className="flex flex-wrap items-center gap-3 p-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-raised"><Icon name={c.icon} /></span>
+                <span className="min-w-[130px] flex-1 font-bold">{c.id === 'signs' ? 'Road signs only' : c.label}</span>
+                <span className="flex flex-wrap gap-2">
+                  {LEVELS.map((d) => {
+                    const t = topicSet(c.id, d);
+                    const r = p.resume[t.id];
+                    const best = p.sets[t.id];
+                    return (
+                      <button key={d} onClick={() => onStartSet({ ...t, label: `${c.label}: ${LEVEL_LABEL[d]}` })} disabled={!t.ids.length}
+                        aria-label={`${c.label}, ${LEVEL_LABEL[d]}, ${t.ids.length} questions${r ? ', in progress' : ''}`}
+                        className={`min-h-[44px] rounded-xl px-3 py-1.5 text-left text-sm font-bold transition hover:brightness-95 disabled:opacity-40 ${LEVEL_STYLE[d].chip}`}>
+                        {LEVEL_LABEL[d]} <span className="font-semibold opacity-80">· {t.ids.length}</span>
+                        {(r || best) && <span className="block text-[11px] font-semibold opacity-80">{r ? `At ${Math.min(r.i + 1, t.ids.length)}/${t.ids.length}` : `Best ${best!.best}%`}</span>}
+                      </button>
+                    );
+                  })}
                 </span>
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      {topic !== 'review' && (
-        <fieldset className="mt-6">
-          <legend className="mb-3 text-sm font-extrabold uppercase tracking-wider text-muted">2. Level</legend>
-          <div className="grid grid-cols-3 gap-2 rounded-2xl bg-raised p-1.5">
-            {([[1, 'Beginner'], [2, 'Intermediate'], [3, 'Advanced']] as const).map(([d, l]) => (
-              <label key={d} className={`cursor-pointer rounded-xl py-3 text-center text-sm font-bold transition sm:text-base ${difficulty === d ? 'bg-surface shadow-sm' : 'text-muted'}`}>
-                <input type="radio" name="level" className="sr-only" checked={difficulty === d} onChange={() => setDifficulty(d)} />{l}
-              </label>
+              </div>
             ))}
+            <div className="flex flex-wrap items-center gap-3 p-4">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-raised"><RotateCcw className="h-5 w-5" aria-hidden="true" /></span>
+              <span className="min-w-[130px] flex-1">
+                <span className="block font-bold">Missed questions</span>
+                <span className="block text-sm text-muted">{p.missed.length ? `${p.missed.length} to get right again` : 'Nothing to review yet'}</span>
+              </span>
+              <Button size="sm" variant="navy" disabled={!p.missed.length} onClick={onReview}>Review</Button>
+            </div>
           </div>
-        </fieldset>
-      )}
+        )}
+      </Card>
 
-      <fieldset className="mt-6">
-        <legend className="mb-3 text-sm font-extrabold uppercase tracking-wider text-muted">{topic === 'review' ? '2' : '3'}. Number of questions</legend>
-        <div className="grid grid-cols-3 gap-2 rounded-2xl bg-raised p-1.5">
-          {[10, 20, 40].map((n) => (
-            <label key={n} className={`cursor-pointer rounded-xl py-3 text-center font-bold transition ${count === n ? 'bg-surface shadow-sm' : 'text-muted'}`}>
-              <input type="radio" name="count" className="sr-only" checked={count === n} onChange={() => setCount(n)} />{n}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      <Card className="mt-6 flex items-center justify-between gap-4 p-4">
+      <Card className="mt-4 flex items-center justify-between gap-4 p-4">
         <span className="flex items-center gap-3">
           <Timer className="h-5 w-5 text-muted" aria-hidden="true" />
           <span>
@@ -107,9 +101,44 @@ export default function Practice({ onStart, initial }: { onStart: (c: PracticeCh
         </span>
         <Toggle checked={timed} label="Timer" onChange={(v) => update((s) => ({ ...s, settings: { ...s.settings, timer: v } }))} />
       </Card>
-
-      <Button size="lg" className="mt-6 w-full" onClick={start}><Play className="h-5 w-5" aria-hidden="true" />Start practising</Button>
     </div>
+  );
+}
+
+function SetCard({ set, onStart }: { set: PracticeSet; onStart: (s: PracticeSet) => void }) {
+  const p = useProgress();
+  const r = p.resume[set.id];
+  const done = p.sets[set.id];
+  const total = set.ids.length;
+  const st = LEVEL_STYLE[set.level];
+  const at = r ? Math.min(r.i, total) : 0;
+  const right = r ? r.answers.filter((a) => a.correct).length : 0;
+  return (
+    <Card className="flex flex-col p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-2xl font-extrabold tracking-tight">{set.label}</h3>
+          <p className="text-sm text-muted">{total} questions · all topics</p>
+        </div>
+        {done ? (
+          <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-extrabold ${done.best >= 80 ? 'bg-good-soft text-good' : 'bg-raised'}`}>
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />Best {done.best}%
+          </span>
+        ) : (
+          <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${st.chip}`}>{LEVEL_LABEL[set.level]}</span>
+        )}
+      </div>
+      <div className="mt-4">
+        <Bar value={at / total} color={st.bar} label={`${set.label} progress`} />
+        <p className="mt-1.5 text-xs font-semibold text-muted">
+          {r ? `In progress: ${at} of ${total} answered, ${right} correct` : done ? `Finished ${done.plays} time${done.plays === 1 ? '' : 's'}` : 'Not started'}
+        </p>
+      </div>
+      <div className="mt-4 flex gap-2">
+        <Button className="flex-1" onClick={() => onStart(set)}><Play className="h-4 w-4" aria-hidden="true" />{r ? 'Continue' : done ? 'Play again' : 'Start'}</Button>
+        {r && <Button variant="ghost" onClick={() => clearResume(set.id)} aria-label={`Start ${set.label} over`}>Start over</Button>}
+      </div>
+    </Card>
   );
 }
 

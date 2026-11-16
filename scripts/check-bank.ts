@@ -1,6 +1,6 @@
 // Validates the question bank: run with `npm run check`.
 declare const process: { exit(code: number): never };
-import { BANK, CATEGORIES } from '../src/data/bank';
+import { BANK, CATEGORIES, SETS } from '../src/data/bank';
 import { ALL_SIGNS, SIGNS } from '../src/data/signs';
 
 let errors = 0;
@@ -23,6 +23,15 @@ for (const s of ALL_SIGNS) {
   for (const r of s.related) if (!SIGNS[r]) fail(`sign ${s.id}: unknown related ${r}`);
 }
 console.log(`${BANK.length} questions, ${ALL_SIGNS.length} signs`);
+for (const d of [1, 2, 3]) if (BANK.filter((q) => q.difficulty === d).length !== 200) fail(`level ${d} has ${BANK.filter((q) => q.difficulty === d).length} questions, expected 200`);
+const inSets = new Set<string>();
+for (const st of SETS) {
+  if (st.ids.length !== 100) fail(`${st.id} has ${st.ids.length} questions`);
+  for (const id of st.ids) { if (inSets.has(id)) fail(`${id} is in two sets`); inSets.add(id); }
+  const mix = CATEGORIES.map((c) => `${c.id} ${st.ids.filter((id) => BANK.find((q) => q.id === id)!.category === c.id).length}`).join(', ');
+  console.log(`  ${st.label.padEnd(9)} ${st.ids.length}   (${mix})`);
+}
+if (inSets.size !== BANK.length) fail(`sets cover ${inSets.size} of ${BANK.length} questions`);
 for (const c of CATEGORIES) {
   const qs = BANK.filter((q) => q.category === c.id);
   const d = [1, 2, 3].map((n) => qs.filter((q) => q.difficulty === n).length);

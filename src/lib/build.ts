@@ -1,7 +1,7 @@
-import { BANK, BY_ID, hashStr, prepare, rng, shuffle } from '../data/bank';
+import { BANK, BY_ID, hashStr, prepare, rng, shuffle, type PracticeSet } from '../data/bank';
 import { SIGNS } from '../data/signs';
 import type { CategoryId, Difficulty, Question, SourceId } from '../data/types';
-import { dayKey, getProgress } from '../store';
+import { dayKey } from '../store';
 
 /** A question ready to play. Options may be 2 to 4, and may be shown as signs. */
 export interface PlayQ {
@@ -24,35 +24,9 @@ const toPlay = (q: Question, rand?: () => number): PlayQ => {
   return { ...p, options: [...p.options] };
 };
 
-const LEVELS: Record<Difficulty, Difficulty[]> = { 1: [1], 2: [1, 2], 3: [2, 3] };
-
-export interface PracticeConfig {
-  cats: CategoryId[];
-  difficulty: Difficulty;
-  count: number;
-}
-
-/** Picks questions, favouring ones not yet seen and ones answered wrong last time. */
-export function practiceSet(cfg: PracticeConfig): PlayQ[] {
-  const stats = getProgress().qstats;
-  const inCats = BANK.filter((q) => cfg.cats.includes(q.category));
-  let pool = inCats.filter((q) => LEVELS[cfg.difficulty].includes(q.difficulty));
-  if (pool.length < cfg.count) pool = inCats;
-  const scored = pool.map((q) => {
-    const s = stats[q.id];
-    const prio = Math.random() + (!s ? 0.6 : 0) + (s && s.last === 0 ? 0.9 : 0) + (cfg.difficulty === 3 && q.difficulty === 3 ? 0.4 : 0);
-    return { q, prio };
-  });
-  scored.sort((a, b) => b.prio - a.prio);
-  const picked: Question[] = [];
-  const signsUsed = new Set<string>();
-  for (const { q } of scored) {
-    if (picked.length >= cfg.count) break;
-    if (q.sign && signsUsed.has(q.sign)) continue; // avoid the same picture twice in one quiz
-    if (q.sign) signsUsed.add(q.sign);
-    picked.push(q);
-  }
-  return shuffle(picked).map((q) => toPlay(q));
+/** The questions of a fixed set, with answer options shuffled by `seed` so a saved place can be restored exactly. */
+export function setQuestions(set: PracticeSet, seed: number): PlayQ[] {
+  return set.ids.map((id) => toPlay(BY_ID[id], rng(hashStr(id + seed))));
 }
 
 export function reviewSet(ids: string[], count = 20): PlayQ[] {

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Home, BookOpenCheck, Signpost, ClipboardCheck, BarChart3, User } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
-import Practice, { type PracticeChoice } from './pages/Practice';
+import Practice from './pages/Practice';
 import Quiz, { type QuizSpec } from './pages/Quiz';
 import Results, { type ResultsData } from './pages/Results';
 import Signs, { SignDetail } from './pages/Signs';
 import { MockIntro, MockTest } from './pages/Mock';
 import { ProgressPage, ProfilePage } from './pages/Progress';
-import { CATEGORIES, shuffle } from './data/bank';
+import { shuffle, type PracticeSet } from './data/bank';
 import type { CategoryId } from './data/types';
-import { dailySet, practiceSet, reviewSet, type PlayQ } from './lib/build';
+import { dailySet, reviewSet, setQuestions, type PlayQ } from './lib/build';
 import { ACHIEVEMENTS, getProgress, useProgress, type Attempt } from './store';
 import { Toast } from './components/ui';
 
@@ -40,7 +40,7 @@ export default function App() {
   const [route, setRoute] = useState<Route>(readRoute);
   const [quiz, setQuiz] = useState<QuizSpec | null>(null);
   const [results, setResults] = useState<ResultsData | null>(null);
-  const [practiceTopic, setPracticeTopic] = useState<CategoryId | undefined>();
+  const [topicsOpen, setTopicsOpen] = useState(false);
   const [sign, setSign] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -77,14 +77,21 @@ export default function App() {
     go('quiz');
   }, [go]);
 
-  const startPractice = (c: PracticeChoice) => {
-    const qs = c.review ? reviewSet(getProgress().missed, c.count) : practiceSet({ cats: c.cats, difficulty: c.difficulty, count: c.count });
-    startQuiz({ mode: c.review ? 'review' : 'practice', title: c.title, questions: qs, timeLimit: c.timed ? 30 : 0, hints: true });
+  /** Starts a fixed set, or picks it up where the person left off. */
+  const startSet = (set: PracticeSet) => {
+    const saved = getProgress().resume[set.id];
+    let resume = saved;
+    if (saved && saved.i >= set.ids.length) {
+      // every question was answered but the results were never opened: replay the last one
+      resume = { ...saved, i: set.ids.length - 1, answers: saved.answers.slice(0, set.ids.length - 1) };
+    }
+    const seed = resume ? resume.seed : Math.floor(Math.random() * 1e9);
+    startQuiz({
+      mode: 'practice', title: set.label, questions: setQuestions(set, seed), timeLimit: getProgress().settings.timer ? 30 : 0, hints: true,
+      setId: set.id, seed, resume,
+    });
   };
-  const startCategory = (cat: CategoryId) => {
-    const label = CATEGORIES.find((c) => c.id === cat)!.label;
-    startQuiz({ mode: 'practice', title: label, questions: practiceSet({ cats: [cat], difficulty: 2, count: 10 }), timeLimit: getProgress().settings.timer ? 30 : 0, hints: true });
-  };
+  const startCategory = (_cat: CategoryId) => { setTopicsOpen(true); go('practice'); };
   const startDaily = () => startQuiz({ mode: 'daily', title: 'Daily challenge', questions: dailySet(), timeLimit: 0, hints: false });
   const startReview = () => startQuiz({ mode: 'review', title: 'Missed questions', questions: reviewSet(getProgress().missed, 20), timeLimit: 0, hints: true });
 
@@ -101,13 +108,13 @@ export default function App() {
   let page: JSX.Element | null = null;
   switch (route) {
     case 'home':
-      page = <Dashboard go={go} startCategory={startCategory} startDaily={startDaily} startReview={startReview} />;
+      page = <Dashboard go={go} startCategory={startCategory} startDaily={startDaily} startReview={startReview} startSet={startSet} />;
       break;
     case 'practice':
-      page = <Practice key={practiceTopic} initial={practiceTopic} onStart={startPractice} />;
+      page = <Practice key={String(topicsOpen)} openTopics={topicsOpen} onStartSet={startSet} onReview={startReview} />;
       break;
     case 'quiz':
-      page = quiz && <Quiz key={quiz.title + quiz.questions[0]?.id} spec={quiz} onFinish={finished} onExit={() => { setQuiz(null); go('home'); }} />;
+      page = quiz && <Quiz key={quiz.title + quiz.questions[0]?.id + (quiz.seed ?? '')} spec={quiz} onFinish={finished} onExit={() => { setQuiz(null); go('home'); }} />;
       break;
     case 'results':
       page = results && (
@@ -147,7 +154,7 @@ export default function App() {
             </button>
             <nav className="ml-auto hidden items-center gap-1 md:flex" aria-label="Main">
               {NAV.map((n) => (
-                <button key={n.id} onClick={() => { if (n.id === 'practice') setPracticeTopic(undefined); go(n.id); }} aria-current={active === n.id ? 'page' : undefined}
+                <button key={n.id} onClick={() => { if (n.id === 'practice') setTopicsOpen(false); go(n.id); }} aria-current={active === n.id ? 'page' : undefined}
                   className={`rounded-xl px-3.5 py-2 text-sm font-bold transition ${active === n.id ? 'bg-white/15 text-yellow' : 'text-white/85 hover:bg-white/10'}`}>{n.label}</button>
               ))}
             </nav>
@@ -170,7 +177,7 @@ export default function App() {
               const on = active === n.id;
               const I = n.icon;
               return (
-                <button key={n.id} onClick={() => { if (n.id === 'practice') setPracticeTopic(undefined); go(n.id); }} aria-current={on ? 'page' : undefined}
+                <button key={n.id} onClick={() => { if (n.id === 'practice') setTopicsOpen(false); go(n.id); }} aria-current={on ? 'page' : undefined}
                   className={`flex min-h-[60px] flex-col items-center justify-center gap-0.5 text-[11px] font-bold ${on ? 'text-info' : 'text-muted'}`}>
                   <span className={`flex h-7 w-12 items-center justify-center rounded-full ${on ? 'bg-info-soft' : ''}`}><I className="h-5 w-5" aria-hidden="true" /></span>
                   {n.mobile}

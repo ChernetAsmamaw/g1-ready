@@ -3,7 +3,7 @@ import { Check, Clock, Lightbulb, X, ArrowRight, Zap } from 'lucide-react';
 import { SignSvg } from '../data/signs';
 import { SOURCE_LABEL } from '../data/bank';
 import type { PlayQ } from '../lib/build';
-import { recordAttempt, useProgress, type AnswerRec, type Attempt, type Mode } from '../store';
+import { clearResume, recordAttempt, recordSet, saveResume, useProgress, type AnswerRec, type Attempt, type Mode, type ResumeState } from '../store';
 import { Bar, Button } from '../components/ui';
 import { sfx } from '../lib/sound';
 
@@ -14,6 +14,10 @@ export interface QuizSpec {
   /** Seconds per question; 0 = untimed. */
   timeLimit: number;
   hints: boolean;
+  /** Fixed practice set: progress is saved after every answer so it can be resumed. */
+  setId?: string;
+  seed?: number;
+  resume?: ResumeState;
 }
 
 const LETTERS = ['A', 'B', 'C', 'D'];
@@ -21,20 +25,20 @@ const LETTERS = ['A', 'B', 'C', 'D'];
 export default function Quiz({ spec, onFinish, onExit }: { spec: QuizSpec; onFinish: (a: Attempt, earned: string[], qs: PlayQ[]) => void; onExit: () => void }) {
   const { settings } = useProgress();
   const qs = spec.questions;
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(spec.resume?.i ?? 0);
   const [chosen, setChosen] = useState<number | null>(null);
   const [locked, setLocked] = useState(false);
   const [eliminated, setEliminated] = useState<number | null>(null);
   const [hintUsed, setHintUsed] = useState(false);
-  const [points, setPoints] = useState(0);
+  const [points, setPoints] = useState(spec.resume?.points ?? 0);
   const [gained, setGained] = useState(0);
-  const [combo, setCombo] = useState(0);
-  const [bestCombo, setBestCombo] = useState(0);
+  const [combo, setCombo] = useState(spec.resume?.combo ?? 0);
+  const [bestCombo, setBestCombo] = useState(spec.resume?.bestCombo ?? 0);
   const [left, setLeft] = useState(spec.timeLimit);
   const [confirmExit, setConfirmExit] = useState(false);
-  const answers = useRef<AnswerRec[]>([]);
+  const answers = useRef<AnswerRec[]>(spec.resume ? spec.resume.answers.slice() : []);
   const qStart = useRef(Date.now());
-  const start = useRef(Date.now());
+  const start = useRef(Date.now() - (spec.resume?.elapsed ?? 0));
   const nextRef = useRef<HTMLButtonElement>(null);
   const headRef = useRef<HTMLHeadingElement>(null);
 
@@ -81,6 +85,12 @@ export default function Quiz({ spec, onFinish, onExit }: { spec: QuizSpec; onFin
     if (locked) nextRef.current?.focus();
   }, [locked]);
 
+  // save the place in a fixed set after every answer
+  useEffect(() => {
+    if (!spec.setId) return;
+    saveResume(spec.setId, { seed: spec.seed ?? 0, i: locked ? i + 1 : i, answers: answers.current.slice(), points, combo, bestCombo, elapsed: Date.now() - start.current });
+  }, [locked, i, points, combo, bestCombo]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const finish = useCallback(() => {
     const byCat: Attempt['byCat'] = {};
     const recs = answers.current;
@@ -103,9 +113,13 @@ export default function Quiz({ spec, onFinish, onExit }: { spec: QuizSpec; onFin
       answers: recs,
     };
     const earned = recordAttempt(a, { combo: bestCombo });
+    if (spec.setId) {
+      clearResume(spec.setId);
+      recordSet(spec.setId, Math.round((a.correct / a.total) * 100));
+    }
     if (settings.sound) sfx.done();
     onFinish(a, earned, qs);
-  }, [qs, spec.mode, spec.title, points, bestCombo, onFinish, settings.sound]);
+  }, [qs, spec.mode, spec.title, spec.setId, points, bestCombo, onFinish, settings.sound]);
 
   const next = useCallback(() => {
     if (i + 1 >= qs.length) return finish();
@@ -256,7 +270,7 @@ export default function Quiz({ spec, onFinish, onExit }: { spec: QuizSpec; onFin
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" role="alertdialog" aria-modal="true" aria-label="Leave quiz?">
           <div className="pop w-full max-w-sm rounded-3xl bg-surface p-6 text-center shadow-2xl">
             <h2 className="text-xl font-extrabold">Leave this quiz?</h2>
-            <p className="mt-2 text-muted">Answers from this quiz won't be saved.</p>
+            <p className="mt-2 text-muted">{spec.setId ? 'Your place is saved. You can pick up where you left off.' : 'Answers from this quiz won\'t be saved.'}</p>
             <div className="mt-5 grid grid-cols-2 gap-3">
               <Button variant="soft" onClick={() => setConfirmExit(false)} autoFocus>Keep going</Button>
               <Button variant="danger" onClick={onExit}>Leave</Button>

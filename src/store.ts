@@ -44,8 +44,14 @@ export interface Progress {
   achievements: Record<string, number>;
   signsStudied: string[];
   bests: { mock?: number; combo?: number; recognition?: number; match?: number };
+  /** Best score and number of completions for each fixed practice set. */
+  sets: Record<string, { best: number; plays: number }>;
+  /** Saved place in a set that was left part-way through. */
+  resume: Record<string, ResumeState>;
   settings: Settings;
 }
+
+export interface ResumeState { seed: number; i: number; answers: AnswerRec[]; points: number; combo: number; bestCombo: number; elapsed: number }
 
 const KEY = 'g1ready.progress.v1';
 
@@ -62,6 +68,8 @@ export const fresh = (): Progress => ({
   achievements: {},
   signsStudied: [],
   bests: {},
+  sets: {},
+  resume: {},
   settings: { sound: false, timer: false, largeText: false, reduceMotion: false, theme: 'system' },
 });
 
@@ -71,7 +79,7 @@ function load(): Progress {
     if (!raw) return fresh();
     const p = JSON.parse(raw) as Progress;
     const f = fresh();
-    return { ...f, ...p, settings: { ...f.settings, ...(p.settings || {}) }, streak: { ...f.streak, ...(p.streak || {}) }, bests: { ...(p.bests || {}) } };
+    return { ...f, ...p, settings: { ...f.settings, ...(p.settings || {}) }, streak: { ...f.streak, ...(p.streak || {}) }, bests: { ...(p.bests || {}) }, sets: p.sets || {}, resume: p.resume || {} };
   } catch {
     return fresh();
   }
@@ -225,4 +233,24 @@ export function markSignStudied(id: string) {
 
 export function setBest(key: keyof Progress['bests'], value: number) {
   update((p) => ({ ...p, bests: { ...p.bests, [key]: Math.max(p.bests[key] || 0, value) } }));
+}
+
+export function saveResume(setId: string, r: ResumeState) {
+  update((p) => ({ ...p, resume: { ...p.resume, [setId]: r } }));
+}
+
+export function clearResume(setId: string) {
+  if (!getProgress().resume[setId]) return;
+  update((p) => {
+    const resume = { ...p.resume };
+    delete resume[setId];
+    return { ...p, resume };
+  });
+}
+
+export function recordSet(setId: string, score: number) {
+  update((p) => {
+    const cur = p.sets[setId] || { best: 0, plays: 0 };
+    return { ...p, sets: { ...p.sets, [setId]: { best: Math.max(cur.best, score), plays: cur.plays + 1 } } };
+  });
 }

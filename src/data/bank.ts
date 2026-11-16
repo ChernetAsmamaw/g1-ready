@@ -3,6 +3,7 @@ import { safeBank } from './bank-safe';
 import { sharingBank } from './bank-sharing';
 import { licenceBank } from './bank-licence';
 import { extraSignBank, sampleSignBank } from './bank-signs';
+import { extraBank } from './bank-extra';
 import { ALL_SIGNS, SIGNS } from './signs';
 import type { SignDef } from './sign-types';
 import type { CategoryId, Difficulty, Question, SourceId } from './types';
@@ -36,7 +37,7 @@ export function shuffle<T>(arr: T[], rand: () => number = Math.random): T[] {
   return a;
 }
 
-const handwritten: Question[] = [...rulesBank, ...safeBank, ...sharingBank, ...licenceBank, ...sampleSignBank, ...extraSignBank];
+const handwritten: Question[] = [...rulesBank, ...safeBank, ...sharingBank, ...licenceBank, ...sampleSignBank, ...extraSignBank, ...extraBank];
 
 /** Sign ids that already have a hand-written "what does it mean" style question. */
 const covered = new Set(handwritten.map((q) => q.sign).filter(Boolean) as string[]);
@@ -105,7 +106,67 @@ for (const s of ALL_SIGNS) {
   }
 }
 
-export const BANK: Question[] = [...handwritten, ...auto];
+// ---------- Levels ----------
+// The bank is levelled into three equal groups (easy, medium, hard). Authors
+// tag each question 1-3; this step then moves the easiest medium questions
+// down and the hardest medium questions up until the three groups are equal.
+function hardScore(q: Question) {
+  const nums = (q.text + ' ' + q.options[q.answer]).match(/\d[\d,.]*/g)?.length ?? 0;
+  return (q.category === 'licence' ? 0.5 : 0) + Math.min(3, nums) + (q.explanation.length > 180 ? 1 : 0) + (q.id.startsWith('a-do-') ? -3 : 0);
+}
+
+function level(all: Question[]): Question[] {
+  const target = Math.floor(all.length / 3);
+  const out = all.map((q) => ({ ...q }));
+  const count = (d: number) => out.filter((q) => q.difficulty === d).length;
+  const medium = () => out.filter((q) => q.difficulty === 2);
+  const needEasy = target - count(1);
+  if (needEasy > 0) {
+    // "What should you do?" for the most common signs first, then the lowest-scoring questions
+    const cands = [...medium().filter((q) => q.id.startsWith('a-do-')), ...medium().filter((q) => !q.id.startsWith('a-do-')).sort((a, b) => hardScore(a) - hardScore(b) || a.id.localeCompare(b.id))];
+    cands.slice(0, needEasy).forEach((q) => { q.difficulty = 1; });
+  }
+  const needHard = target - count(3);
+  if (needHard > 0) {
+    // keep some penalty questions at medium so Hard is not all fines and suspensions
+    let fromLicence = 0;
+    let moved = 0;
+    for (const q of medium().sort((a, b) => hardScore(b) - hardScore(a) || a.id.localeCompare(b.id))) {
+      if (moved >= needHard) break;
+      if (q.category === 'licence' && ++fromLicence > 20) continue;
+      q.difficulty = 3;
+      moved++;
+    }
+  }
+  return out;
+}
+
+export const BANK: Question[] = level([...handwritten, ...auto]);
+
+// ---------- Fixed practice sets ----------
+export interface PracticeSet { id: string; level: Difficulty; part: number; label: string; ids: string[] }
+export const LEVEL_LABEL: Record<Difficulty, string> = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
+const CAT_ORDER: CategoryId[] = ['signs', 'rules', 'safe', 'sharing', 'licence'];
+
+/** Splits a level into parts with the same mix of topics, in a fixed order. */
+function split(qs: Question[], parts: number, seed: string): string[][] {
+  const sorted = CAT_ORDER.flatMap((c) => shuffle(qs.filter((q) => q.category === c), rng(hashStr(seed + c))));
+  const buckets: Question[][] = Array.from({ length: parts }, () => []);
+  sorted.forEach((q, i) => buckets[i % parts].push(q));
+  return buckets.map((b, i) => shuffle(b, rng(hashStr(seed + 'order' + i))).map((q) => q.id));
+}
+
+export const SETS: PracticeSet[] = ([1, 2, 3] as Difficulty[]).flatMap((d) =>
+  split(BANK.filter((q) => q.difficulty === d), 2, 'set' + d).map((ids, i) => ({
+    id: `${LEVEL_LABEL[d].toLowerCase()}-${i + 1}`, level: d, part: i + 1, label: `${LEVEL_LABEL[d]} ${i + 1}`, ids,
+  })),
+);
+
+/** One topic at one level: every question available, in a fixed order. */
+export function topicSet(cat: CategoryId, d: Difficulty): PracticeSet {
+  const qs = BANK.filter((q) => q.category === cat && q.difficulty === d);
+  return { id: `topic-${cat}-${d}`, level: d, part: 0, label: LEVEL_LABEL[d], ids: shuffle(qs, rng(hashStr('topic' + cat + d))).map((q) => q.id) };
+}
 export const BY_ID: Record<string, Question> = Object.fromEntries(BANK.map((q) => [q.id, q]));
 
 export const CATEGORIES: { id: CategoryId; label: string; short: string; blurb: string; icon: string }[] = [
